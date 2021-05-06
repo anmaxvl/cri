@@ -35,10 +35,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-const (
-	shimBinaryFormat = "containerd-shim-%s-%s"
-	socketPathLimit  = 106
-)
+const shimBinaryFormat = "containerd-shim-%s-%s"
 
 func getSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
@@ -66,21 +63,20 @@ func AdjustOOMScore(pid int) error {
 	return nil
 }
 
-const socketRoot = "/run/containerd"
-
-// SocketAddress returns a socket address
-func SocketAddress(ctx context.Context, socketPath, id string) (string, error) {
+// SocketAddress returns an abstract socket address
+func SocketAddress(ctx context.Context, id string) (string, error) {
 	ns, err := namespaces.NamespaceRequired(ctx)
 	if err != nil {
 		return "", err
 	}
-	d := sha256.Sum256([]byte(filepath.Join(socketPath, ns, id)))
-	return fmt.Sprintf("unix://%s/%x", filepath.Join(socketRoot, "s"), d), nil
+	d := sha256.Sum256([]byte(filepath.Join(ns, id)))
+	return filepath.Join(string(filepath.Separator), "containerd-shim", fmt.Sprintf("%x.sock", d)), nil
 }
 
-// AnonDialer returns a dialer for a socket
+// AnonDialer returns a dialer for an abstract socket
 func AnonDialer(address string, timeout time.Duration) (net.Conn, error) {
-	return dialer.Dialer(socket(address).path(), timeout)
+	address = strings.TrimPrefix(address, "unix://")
+	return dialer.Dialer("\x00"+address, timeout)
 }
 
 func AnonReconnectDialer(address string, timeout time.Duration) (net.Conn, error) {
@@ -89,82 +85,12 @@ func AnonReconnectDialer(address string, timeout time.Duration) (net.Conn, error
 
 // NewSocket returns a new socket
 func NewSocket(address string) (*net.UnixListener, error) {
-	var (
-		sock = socket(address)
-		path = sock.path()
-	)
-	if !sock.isAbstract() {
-		if err := os.MkdirAll(filepath.Dir(path), 0600); err != nil {
-			return nil, errors.Wrapf(err, "%s", path)
-		}
+	if len(address) > 106 {
+		return nil, errors.Errorf("%q: unix socket path too long (> 106)", address)
 	}
-	l, err := net.Listen("unix", path)
+	l, err := net.Listen("unix", "\x00"+address)
 	if err != nil {
-		return nil, err
-	}
-	if err := os.Chmod(path, 0600); err != nil {
-		os.Remove(sock.path())
-		l.Close()
-		return nil, err
+		return nil, errors.Wrapf(err, "failed to listen to abstract unix socket %q", address)
 	}
 	return l.(*net.UnixListener), nil
-}
-
-const abstractSocketPrefix = "\x00"
-
-type socket string
-
-func (s socket) isAbstract() bool {
-	return !strings.HasPrefix(string(s), "unix://")
-}
-
-func (s socket) path() string {
-	path := strings.TrimPrefix(string(s), "unix://")
-	// if there was no trim performed, we assume an abstract socket
-	if len(path) == len(s) {
-		path = abstractSocketPrefix + path
-	}
-	return path
-}
-
-// RemoveSocket removes the socket at the specified address if
-// it exists on the filesystem
-func RemoveSocket(address string) error {
-	sock := socket(address)
-	if !sock.isAbstract() {
-		return os.Remove(sock.path())
-	}
-	return nil
-}
-
-// SocketEaddrinuse returns true if the provided error is caused by the
-// EADDRINUSE error number
-func SocketEaddrinuse(err error) bool {
-	netErr, ok := err.(*net.OpError)
-	if !ok {
-		return false
-	}
-	if netErr.Op != "listen" {
-		return false
-	}
-	syscallErr, ok := netErr.Err.(*os.SyscallError)
-	if !ok {
-		return false
-	}
-	errno, ok := syscallErr.Err.(syscall.Errno)
-	if !ok {
-		return false
-	}
-	return errno == syscall.EADDRINUSE
-}
-
-// CanConnect returns true if the socket provided at the address
-// is accepting new connections
-func CanConnect(address string) bool {
-	conn, err := AnonDialer(address, 100*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	conn.Close()
-	return true
 }

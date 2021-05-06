@@ -275,7 +275,7 @@ func launchService(s *server.Server, done chan struct{}) error {
 		done:    done,
 	}
 
-	interactive, err := svc.IsAnInteractiveSession()
+	interactive, err := svc.IsAnInteractiveSession() // nolint:staticcheck
 	if err != nil {
 		return err
 	}
@@ -323,7 +323,7 @@ Loop:
 
 func initPanicFile(path string) error {
 	var err error
-	panicFile, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	panicFile, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
 		return err
 	}
@@ -347,8 +347,8 @@ func initPanicFile(path string) error {
 	// Update STD_ERROR_HANDLE to point to the panic file so that Go writes to
 	// it when it panics. Remember the old stderr to restore it before removing
 	// the panic file.
-	sh := uint32(windows.STD_ERROR_HANDLE)
-	h, err := windows.GetStdHandle(sh)
+	sh := windows.STD_ERROR_HANDLE
+	h, err := windows.GetStdHandle(uint32(sh))
 	if err != nil {
 		return err
 	}
@@ -372,7 +372,7 @@ func initPanicFile(path string) error {
 func removePanicFile() {
 	if st, err := panicFile.Stat(); err == nil {
 		if st.Size() == 0 {
-			sh := uint32(windows.STD_ERROR_HANDLE)
+			sh := windows.STD_ERROR_HANDLE
 			setStdHandle.Call(uintptr(sh), uintptr(oldStderr))
 			panicFile.Close()
 			os.Remove(panicFile.Name())

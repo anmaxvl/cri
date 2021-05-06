@@ -20,6 +20,7 @@ package run
 
 import (
 	gocontext "context"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -42,6 +43,10 @@ var platformRunFlags = []cli.Flag{
 		Name:  "runc-binary",
 		Usage: "specify runc-compatible binary",
 	},
+	cli.StringFlag{
+		Name:  "runc-root",
+		Usage: "specify runc-compatible root",
+	},
 	cli.BoolFlag{
 		Name:  "runc-systemd-cgroup",
 		Usage: "start runc with systemd cgroup manager",
@@ -60,8 +65,12 @@ var platformRunFlags = []cli.Flag{
 	},
 	cli.Float64Flag{
 		Name:  "cpus",
-		Usage: "set the CFS cpu qouta",
+		Usage: "set the CFS cpu quota",
 		Value: 0.0,
+	},
+	cli.BoolFlag{
+		Name:  "cni",
+		Usage: "enable cni networking for the container",
 	},
 }
 
@@ -181,9 +190,21 @@ func NewContainer(ctx gocontext.Context, client *containerd.Client, context *cli
 		if context.Bool("net-host") {
 			opts = append(opts, oci.WithHostNamespace(specs.NetworkNamespace), oci.WithHostHostsFile, oci.WithHostResolvconf)
 		}
-		if context.Bool("seccomp") {
-			opts = append(opts, seccomp.WithDefaultProfile())
+
+		seccompProfile := context.String("seccomp-profile")
+
+		if !context.Bool("seccomp") && seccompProfile != "" {
+			return nil, fmt.Errorf("seccomp must be set to true, if using a custom seccomp-profile")
 		}
+
+		if context.Bool("seccomp") {
+			if seccompProfile != "" {
+				opts = append(opts, seccomp.WithProfile(seccompProfile))
+			} else {
+				opts = append(opts, seccomp.WithDefaultProfile())
+			}
+		}
+
 		if cpus := context.Float64("cpus"); cpus > 0.0 {
 			var (
 				period = uint64(100000)
@@ -262,6 +283,9 @@ func getRuncOptions(context *cli.Context) (*options.Options, error) {
 			return nil, errors.New("option --runc-systemd-cgroup requires --cgroup to be set, e.g. \"machine.slice:foo:deadbeef\"")
 		}
 		runtimeOpts.SystemdCgroup = true
+	}
+	if root := context.String("runc-root"); root != "" {
+		runtimeOpts.Root = root
 	}
 
 	return runtimeOpts, nil
