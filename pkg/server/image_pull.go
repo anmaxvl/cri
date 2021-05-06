@@ -31,6 +31,7 @@ import (
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/remotes/docker"
+	"github.com/containerd/containerd/snapshots"
 	distribution "github.com/docker/distribution/reference"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -114,6 +115,7 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 		containerd.WithPullUnpack,
 		containerd.WithPullLabel(imageLabelKey, imageLabelValue),
 		containerd.WithImageHandler(imageHandler),
+		containerd.WithPullLabels(snapshots.FilterInheritedLabels(r.GetSandboxConfig().GetAnnotations())),
 	}
 
 	if !c.config.ContainerdConfig.DisableSnapshotAnnotations {
