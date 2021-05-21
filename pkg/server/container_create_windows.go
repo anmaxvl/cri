@@ -192,6 +192,15 @@ func (c *criService) CreateContainer(ctx context.Context, r *runtime.CreateConta
 		}
 	}
 
+	var specOpts []oci.SpecOpts
+	if val, ok := config.Annotations["io.microsoft.container.storage.shm.size-kb"]; ok {
+		sz, err := strconv.ParseInt(val, 10, 64)
+		if err != nil {
+			sz = 64*1024
+		}
+		specOpts = append(specOpts, oci.WithDevShmSize(sz))
+	}
+
 	snapshotterOpt := snapshots.WithLabels(config.Annotations)
 	// Set snapshotter before any other options.
 	opts := []containerd.NewContainerOpts{
@@ -232,7 +241,7 @@ func (c *criService) CreateContainer(ctx context.Context, r *runtime.CreateConta
 		return nil, errors.Wrap(err, "failed to get runtime options")
 	}
 	opts = append(opts,
-		containerd.WithSpec(spec),
+		containerd.WithSpec(spec, specOpts...),
 		containerd.WithContainerLabels(containerLabels),
 		containerd.WithContainerExtension(containerMetadataExtension, &meta),
 		containerd.WithRuntime(sandboxInfo.Runtime.Name, runtimeOptions))
